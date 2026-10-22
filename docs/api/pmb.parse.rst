@@ -84,6 +84,14 @@ pmb.parse._apkbuild module
    :undoc-members:
    :show-inheritance:
 
+pmb.parse._apkbuild_eval module
+-------------------------------
+
+.. automodule:: pmb.parse._apkbuild_eval
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Module contents
 ---------------
 

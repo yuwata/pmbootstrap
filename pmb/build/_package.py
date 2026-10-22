@@ -14,6 +14,7 @@ import pmb.helpers.package
 import pmb.helpers.pmaports
 import pmb.helpers.repo
 import pmb.parse
+import pmb.parse._apkbuild_eval
 import pmb.parse.apkindex
 from pmb.build.other import BuildStatus
 from pmb.core import Chroot
@@ -186,18 +187,23 @@ def is_cached_or_cache(arch: Arch, pkgname: str) -> bool:
     return visited
 
 
-def get_apkbuild(pkgname: str) -> tuple[Path | None, Apkbuild | None]:
+def get_apkbuild(pkgname: str, arch: Arch | None = None) -> tuple[Path | None, Apkbuild | None]:
     """
     Parse the APKBUILD path for pkgname.
 
     When there is none, try to find it in the binary package APKINDEX files or raise an exception.
 
     :param pkgname: package name to be built, as specified in the APKBUILD
+    :param arch: architecture the package gets built for. If set, the dependencies are
+                 taken from evaluating the APKBUILD in the chroot, see
+                 pmb.parse._apkbuild_eval.
     :returns: None or parsed APKBUILD
     """
     # Get pmaport, skip upstream only packages
     pmaport, apkbuild = pmb.helpers.pmaports.get_with_path(pkgname, False)
     if pmaport:
+        if arch is not None and apkbuild:
+            apkbuild = pmb.parse._apkbuild_eval.refine(apkbuild, pmaport / "APKBUILD", arch)
         pmaport = pkgrepo_relative_path(pmaport)[0]
         return pmaport, apkbuild
 
@@ -352,6 +358,12 @@ def process_package(
         logging.verbose(f"S{arch}/{pkgname}: already queued")
         return []
 
+    # Now that the arch is known: evaluate the APKBUILD if necessary, so dependencies
+    # that are only added for some arches or options are not missed.
+    base_aports, base_apkbuild = get_apkbuild(pkgname, arch)
+    if not base_apkbuild:
+        raise RuntimeError(f"{pkgname}: Could not find it in pmaports or any APKINDEX!")
+
     logging.debug(f"{arch}/{pkgname}: Generating dependency tree")
     # Add the package to the build queue
     base_depends = get_depends(context, base_apkbuild)
@@ -390,7 +402,7 @@ def process_package(
         if index_data:
             dep = index_data.pkgname
 
-        aports, apkbuild = get_apkbuild(dep)
+        aports, apkbuild = get_apkbuild(dep, arch)
         if not apkbuild:
             continue
 
@@ -545,9 +557,11 @@ def packages(
                 aport, apkbuild = get_apkbuild(pkgname)
                 if not aport or not apkbuild:
                     continue
-                bstatus = pmb.build.get_status(
-                    arch or pmb.build.autodetect.arch(apkbuild), apkbuild
-                )
+                build_arch = arch or pmb.build.autodetect.arch(apkbuild)
+                aport, apkbuild = get_apkbuild(pkgname, build_arch)
+                if not aport or not apkbuild:
+                    continue
+                bstatus = pmb.build.get_status(build_arch, apkbuild)
                 if bstatus.necessary():
                     if strict:
                         raise RuntimeError(
