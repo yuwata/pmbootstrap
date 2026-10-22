@@ -614,6 +614,15 @@ def packages(
             }
         )
 
+        # Install the cross compiler into the native chroot. This must happen before the
+        # buildroots are initialized: pmb.chroot.apk.install() builds the packages that are
+        # missing or outdated (e.g. musl-dev-aarch64 as a dependency of gcc-aarch64), and
+        # every finished build zaps all buildroots in strict mode, which would remove the
+        # buildroots that we have just initialized.
+        init_cross = (strict or cross != prev_cross) and cross.enabled()
+        if init_cross:
+            pmb.build.init_compiler(context, pkg_depends, cross, pkg_arch)
+
         # One time chroot initialization
         if hostchroot != buildchroot:
             pmb.build.init(hostchroot)
@@ -623,10 +632,8 @@ def packages(
             if "rust" in all_dependencies or "cargo" in all_dependencies:
                 pmb.chroot.apk.install(["sccache"], buildchroot)
 
-        if (strict or cross != prev_cross) and cross.enabled():
-            pmb.build.init_compiler(context, pkg_depends, cross, pkg_arch)
-            if cross == CrossCompile.CROSSDIRECT:
-                pmb.chroot.mount_native_into_foreign(buildchroot)
+        if init_cross and cross == CrossCompile.CROSSDIRECT:
+            pmb.chroot.mount_native_into_foreign(buildchroot)
 
         depends_build: list[str] = []
         depends_host: list[str] = []
